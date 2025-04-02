@@ -7,6 +7,8 @@ import io
 import sys
 import logging
 import requests
+from datetime import datetime
+from db import LecturasDB
 
 # Configurar logging
 logging.basicConfig(level=logging.INFO)
@@ -109,12 +111,112 @@ def analizar_texto_con_gemma(texto, historial_mensajes=None, es_correccion=False
         logger.error(f"Error al analizar con Gemma: {str(e)}")
         return f"Error al analizar con Gemma: {str(e)}"
 
+def mostrar_documento(contenido_archivo, tipo_documento):
+    """Muestra un documento (imagen o PDF) en la interfaz."""
+    try:
+        if tipo_documento == 'application/pdf':
+            imagenes = convert_from_bytes(contenido_archivo)
+            for i, imagen in enumerate(imagenes):
+                st.image(imagen, caption=f"Página {i+1}", use_container_width=True)
+        else:
+            imagen = Image.open(io.BytesIO(contenido_archivo))
+            st.image(imagen, caption="Documento", use_container_width=True)
+    except Exception as e:
+        st.error(f"Error al mostrar el documento: {str(e)}")
+
+def mostrar_historial(db):
+    """Muestra la interfaz del historial de lecturas."""
+    st.title("📚 Historial de Lecturas")
+    
+    # Obtener todas las lecturas
+    lecturas = db.obtener_lecturas()
+    
+    if not lecturas:
+        st.info("No hay lecturas guardadas en el historial.")
+        return
+    
+    # Crear una tabla con las lecturas
+    lecturas_data = []
+    for lectura in lecturas:
+        id, nombre, texto, analisis, fecha, tipo, _ = lectura  # Ignorar contenido_archivo en la tabla
+        fecha_formateada = datetime.strptime(fecha, '%Y-%m-%d %H:%M:%S').strftime('%d/%m/%Y %H:%M')
+        lecturas_data.append({
+            "ID": id,
+            "Archivo": nombre,
+            "Fecha": fecha_formateada,
+            "Tipo": tipo or "No especificado"
+        })
+    
+    # Mostrar tabla con las lecturas
+    st.dataframe(
+        lecturas_data,
+        column_config={
+            "ID": st.column_config.NumberColumn("ID", width="small"),
+            "Archivo": st.column_config.TextColumn("Nombre del Archivo"),
+            "Fecha": st.column_config.TextColumn("Fecha de Lectura"),
+            "Tipo": st.column_config.TextColumn("Tipo de Documento")
+        },
+        hide_index=True
+    )
+    
+    # Selector de lectura para ver detalles
+    lectura_seleccionada = st.selectbox(
+        "Selecciona una lectura para ver los detalles:",
+        options=[l[0] for l in lecturas],
+        format_func=lambda x: f"Lectura #{x} - {next((l[1] for l in lecturas if l[0] == x), '')}"
+    )
+    
+    if lectura_seleccionada:
+        lectura = db.obtener_lectura(lectura_seleccionada)
+        if lectura:
+            _, nombre, texto, analisis, fecha, tipo, contenido_archivo = lectura
+            
+            # Mostrar el documento y el análisis en columnas
+            col1, col2 = st.columns([1, 1])
+            
+            with col1:
+                st.subheader("🖼️ Documento")
+                if contenido_archivo:
+                    mostrar_documento(contenido_archivo, tipo)
+                else:
+                    st.warning("No se encontró el documento original")
+                
+                with st.expander("📝 Texto Extraído", expanded=False):
+                    st.text(texto)
+            
+            with col2:
+                st.subheader("📊 Análisis")
+                st.write(analisis)
+            
+            # Botón para eliminar la lectura
+            if st.button("🗑️ Eliminar esta lectura", key=f"delete_{lectura_seleccionada}"):
+                if db.eliminar_lectura(lectura_seleccionada):
+                    st.success("Lectura eliminada correctamente")
+                    st.rerun()
+                else:
+                    st.error("Error al eliminar la lectura")
+
 def main():
     try:
         # Configuración de la página
         st.set_page_config(layout="wide")
         
-        # Título y descripción
+        # Inicializar la base de datos
+        db = LecturasDB()
+        
+        # Barra lateral para navegación
+        with st.sidebar:
+            st.title("📑 Navegación")
+            pagina = st.radio(
+                "Selecciona una página:",
+                ["Nueva Lectura", "Historial de Lecturas"]
+            )
+        
+        if pagina == "Historial de Lecturas":
+            mostrar_historial(db)
+            return
+        
+        # Página principal - Nueva Lectura
         st.title("📄 Lector de Facturas y Boletas")
         st.markdown("""
         Sube una imagen o PDF de tu factura o boleta para analizarla automáticamente.
@@ -174,6 +276,15 @@ def main():
                                 {'role': 'user', 'content': texto_extraido},
                                 {'role': 'assistant', 'content': analisis}
                             ]
+                            
+                            # Guardar la lectura en la base de datos
+                            db.guardar_lectura(
+                                nombre_archivo=archivo.name,
+                                texto_extraido=texto_extraido,
+                                analisis=analisis,
+                                tipo_documento=archivo.type,
+                                contenido_archivo=archivo_bytes
+                            )
                         
                         # Área de análisis actualizado
                         st.subheader("📊 Análisis Actual")
