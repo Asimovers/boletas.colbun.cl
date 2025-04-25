@@ -1,53 +1,76 @@
 import streamlit as st
 from PIL import Image
-import pytesseract
 from pdf2image import convert_from_bytes
-from ollama import Client
 import io
 import sys
 import logging
-import requests
+import os
+import base64
 from datetime import datetime
+from openai import OpenAI
+from dotenv import load_dotenv
 from db import LecturasDB
+
+# Cargar variables de entorno
+load_dotenv()
 
 # Configurar logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Configuración de Ollama
-OLLAMA_HOST = "http://localhost:11434"
-client = Client(host=OLLAMA_HOST)
+# Configuración de OpenAI
+client = OpenAI(api_key=os.getenv('OPENAI_API_KEY'))
 
-def verificar_ollama():
-    """Verifica si Ollama está disponible y si el modelo Gemma está instalado."""
+def verificar_api():
+    """Verifica si la API de OpenAI está configurada correctamente."""
     try:
-        response = requests.get(f"{OLLAMA_HOST}/api/tags")
-        if response.status_code != 200:
-            return False, "No se puede conectar al servidor de Ollama"
+        if not os.getenv('OPENAI_API_KEY'):
+            return False, "No se ha configurado la clave de API de OpenAI. Por favor, configura OPENAI_API_KEY en el archivo .env"
         
-        modelos = response.json().get('models', [])
-        if not any(modelo.get('name', '') == 'gemma3:12b' for modelo in modelos):
-            return False, "El modelo Gemma3 12B no está instalado. Ejecuta 'ollama pull gemma3:12b'"
+        # Hacer una llamada de prueba a la API
+        client.chat.completions.create(
+            model="gpt-3.5-turbo",
+            messages=[{"role": "user", "content": "test"}],
+            max_tokens=5
+        )
         
-        return True, "Ollama y Gemma están disponibles"
+        return True, "API de OpenAI configurada correctamente"
     except Exception as e:
-        return False, f"Error al conectar con Ollama: {str(e)}"
+        return False, f"Error al conectar con OpenAI: {str(e)}"
 
 def procesar_imagen(imagen_bytes):
-    """Procesa una imagen y extrae el texto usando pytesseract."""
+    """Procesa una imagen usando GPT-4 Vision."""
     try:
-        imagen = Image.open(io.BytesIO(imagen_bytes))
-        texto = pytesseract.image_to_string(imagen, lang='spa')
-        if not texto.strip():
-            logger.warning("No se pudo extraer texto de la imagen")
-            return "No se pudo extraer texto de la imagen"
-        return texto
+        # Convertir la imagen a base64
+        imagen_base64 = base64.b64encode(imagen_bytes).decode('utf-8')
+        
+        # Crear el mensaje para GPT-4 Vision
+        response = client.chat.completions.create(
+            model="gpt-4o",
+            messages=[
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": "Analiza esta factura o boleta y extrae la información toda la información de la factura. Responde de manera estructurada y clara, usando viñetas para cada dato."},
+                        {
+                            "type": "image_url",
+                            "image_url": {
+                                "url": f"data:image/jpeg;base64,{imagen_base64}"
+                            }
+                        }
+                    ]
+                }
+            ],
+            max_tokens=1000
+        )
+        
+        return response.choices[0].message.content
     except Exception as e:
         logger.error(f"Error al procesar la imagen: {str(e)}")
         return f"Error al procesar la imagen: {str(e)}"
 
 def procesar_pdf(pdf_bytes):
-    """Convierte PDF a imágenes y extrae el texto."""
+    """Convierte PDF a imágenes y procesa con GPT-4 Vision."""
     try:
         try:
             imagenes = convert_from_bytes(pdf_bytes)
@@ -58,38 +81,30 @@ def procesar_pdf(pdf_bytes):
                 return error_msg
             raise e
             
-        texto_completo = []
+        resultados = []
         for imagen in imagenes:
-            texto = pytesseract.image_to_string(imagen, lang='spa')
-            texto_completo.append(texto)
-        resultado = '\n'.join(texto_completo)
-        if not resultado.strip():
-            logger.warning("No se pudo extraer texto del PDF")
-            return "No se pudo extraer texto del PDF"
-        return resultado
+            # Convertir imagen PIL a bytes
+            img_byte_arr = io.BytesIO()
+            imagen.save(img_byte_arr, format='JPEG')
+            img_byte_arr = img_byte_arr.getvalue()
+            
+            # Procesar cada imagen con GPT-4 Vision
+            resultado = procesar_imagen(img_byte_arr)
+            resultados.append(resultado)
+            
+        return '\n\n---\n\n'.join(resultados)
     except Exception as e:
         logger.error(f"Error al procesar el PDF: {str(e)}")
         return f"Error al procesar el PDF: {str(e)}"
 
-def analizar_texto_con_gemma(texto, historial_mensajes=None, es_correccion=False):
-    """Analiza el texto extraído usando el modelo Gemma en Ollama."""
+def analizar_texto_con_openai(texto, historial_mensajes=None, es_correccion=False):
+    """Analiza el texto usando OpenAI."""
     try:
         if "Error al procesar" in texto:
             return "No se puede analizar debido a un error en el procesamiento del documento"
         
         if historial_mensajes is None:
-            prompt = f"""Analiza la siguiente factura o boleta y extrae la información relevante como:
-            - Fecha
-            - Monto total
-            - Productos o servicios
-            - Información del vendedor
-            
-            Texto de la factura:
-            {texto}
-            
-            Responde de manera estructurada y clara, usando viñetas para cada dato.
-            """
-            mensajes = [{'role': 'user', 'content': prompt}]
+            mensajes = [{"role": "user", "content": texto}]
         else:
             if es_correccion:
                 prompt = f"""Basándote en el análisis anterior y la corrección proporcionada: '{texto}',
@@ -98,18 +113,23 @@ def analizar_texto_con_gemma(texto, historial_mensajes=None, es_correccion=False
                 Menciona específicamente qué dato se ha corregido."""
             else:
                 prompt = texto
-            mensajes = historial_mensajes + [{'role': 'user', 'content': prompt}]
+            mensajes = historial_mensajes + [{"role": "user", "content": prompt}]
         
-        logger.info("Enviando texto a Gemma para análisis")
+        logger.info("Enviando consulta a OpenAI")
         try:
-            response = client.chat(model='gemma3:12b', messages=mensajes)
-            return response.message.content
+            respuesta = client.chat.completions.create(
+                model="gpt-4o",
+                messages=mensajes,
+                temperature=0.7,
+                max_tokens=1000
+            )
+            return respuesta.choices[0].message.content
         except Exception as e:
-            logger.error(f"Error en la comunicación con Ollama: {str(e)}")
-            return f"Error al comunicarse con Ollama: {str(e)}"
+            logger.error(f"Error al comunicarse con OpenAI: {str(e)}")
+            return f"Error al analizar con OpenAI: {str(e)}"
     except Exception as e:
-        logger.error(f"Error al analizar con Gemma: {str(e)}")
-        return f"Error al analizar con Gemma: {str(e)}"
+        logger.error(f"Error en el análisis: {str(e)}")
+        return f"Error en el análisis: {str(e)}"
 
 def mostrar_documento(contenido_archivo, tipo_documento):
     """Muestra un documento (imagen o PDF) en la interfaz."""
@@ -220,7 +240,7 @@ def main():
         st.title("📄 Lector de Facturas y Boletas")
         st.markdown("""
         Sube una imagen o PDF de tu factura o boleta para analizarla automáticamente.
-        El sistema extraerá la información relevante usando OCR y la analizará con IA.
+        El sistema extraerá toda la información relevante y la analizará con IA.
         Puedes hacer preguntas o solicitar correcciones sobre los datos extraídos.
         """)
         
@@ -232,16 +252,11 @@ def main():
         if 'analisis_actual' not in st.session_state:
             st.session_state.analisis_actual = ""
 
-        # Verificar si Tesseract está instalado
-        try:
-            pytesseract.get_tesseract_version()
-        except Exception as e:
-            st.error("Error: Tesseract no está instalado. Por favor, instálalo usando 'brew install tesseract'")
-            return
 
-        # Verificar si Ollama está disponible
-        ollama_ok, mensaje = verificar_ollama()
-        if not ollama_ok:
+
+        # Verificar si la API de OpenAI está disponible
+        api_ok, mensaje = verificar_api()
+        if not api_ok:
             st.error(f"Error: {mensaje}")
             return
         else:
@@ -269,8 +284,8 @@ def main():
                     
                     if not "Error al procesar" in texto_extraido:
                         st.session_state.texto_extraido = texto_extraido
-                        with st.spinner('🤖 Analizando con Gemma...'):
-                            analisis = analizar_texto_con_gemma(texto_extraido)
+                        with st.spinner('🤖 Analizando con GPT...'):
+                            analisis = analizar_texto_con_openai(texto_extraido)
                             st.session_state.analisis_actual = analisis
                             st.session_state.historial_chat = [
                                 {'role': 'user', 'content': texto_extraido},
@@ -314,7 +329,7 @@ def main():
                         if st.button("Enviar", key="enviar_pregunta") and pregunta:
                             with st.spinner('🤖 Procesando tu consulta...'):
                                 es_correccion = tipo_interaccion == "Realizar una corrección"
-                                respuesta = analizar_texto_con_gemma(
+                                respuesta = analizar_texto_con_openai(
                                     pregunta,
                                     st.session_state.historial_chat,
                                     es_correccion
