@@ -403,9 +403,9 @@ def main():
             return
         
         # Página principal - Nueva Lectura
-        st.title("📄 Lector de Facturas y Boletas")
+        st.title("📄 Descriptor de Documentos con IA")
         st.markdown("""
-        Sube una imagen o PDF de tu factura o boleta para analizarla automáticamente.
+        Sube una imagen del documento para analizarlo automáticamente.
         El sistema extraerá toda la información relevante y la analizará con IA.
         Puedes hacer preguntas o solicitar correcciones sobre los datos extraídos.
         """)
