@@ -1,14 +1,15 @@
 # Lector de Facturas y Boletas 📄
 
-Aplicación web para procesar y analizar facturas y boletas usando el modelo GPT-4o. La aplicación extrae automáticamente toda la información relevante del documento, permitiendo hacer consultas y correcciones de manera interactiva.
+Aplicación web para procesar y analizar facturas y boletas usando modelos de IA como GPT-4o o Gemma3:12b (local). La aplicación extrae automáticamente toda la información relevante del documento, permitiendo hacer consultas y correcciones de manera interactiva.
 
 ## Características ✨
 
 - Procesa imágenes (PNG, JPG) y documentos PDF
-- Análisis automático usando GPT-4o
-- Extracción y análisis directo de información sin OCR
+- Análisis automático usando GPT-4o (OpenAI) o Gemma3:12b (local vía Ollama)
+- Extracción y análisis directo de información sin OCR externo
 - Interfaz interactiva para hacer preguntas y correcciones
 - Historial de lecturas con vista previa de documentos
+- Capacidad para eliminar registros del historial
 - Base de datos SQLite para almacenamiento persistente
 
 ## Requisitos Previos 💻
@@ -16,7 +17,8 @@ Aplicación web para procesar y analizar facturas y boletas usando el modelo GPT
 1. Python 3.10 o superior
 2. Poetry (gestor de dependencias)
 3. Poppler (para procesar PDFs)
-4. Clave de API de OpenAI
+4. Clave de API de OpenAI (para usar GPT-4o)
+5. Ollama (opcional, para usar Gemma3:12b local)
 
 ### Instalación de Dependencias del Sistema
 
@@ -32,6 +34,15 @@ brew install poppler
 ```bash
 OPENAI_API_KEY=tu_api_key_aqui
 ```
+
+### Configuración de Ollama (opcional)
+
+1. Instala Ollama desde [ollama.ai](https://ollama.ai)
+2. Descarga el modelo Gemma3:12b:
+```bash
+ollama pull gemma3:12b
+```
+3. Asegúrate de que el servidor Ollama esté en ejecución antes de usar el modelo local
 
 ## Instalación 💾
 
@@ -59,7 +70,8 @@ poetry run streamlit run lector_facturas/app.py
 
 #### Nueva Lectura 📄
 - Subir imagen o PDF de factura/boleta
-- Obtener análisis automático detallado
+- Seleccionar entre modelo OpenAI (GPT-4o) o modelo local (Gemma3:12b)
+- Obtener análisis automático detallado en formato estructurado
 - Hacer preguntas sobre el documento
 - Corregir datos mal interpretados
 
@@ -67,7 +79,8 @@ poetry run streamlit run lector_facturas/app.py
 - Ver todas las lecturas realizadas
 - Previsualizar documentos originales
 - Acceder al análisis completo
-- Eliminar lecturas antiguas
+- Eliminar lecturas individuales
+- Ver qué modelo se utilizó para cada análisis
 
 ## Estructura del Proyecto 📂
 
@@ -81,10 +94,13 @@ lector_facturas/
 ## Tecnologías Utilizadas 🛠️
 
 - **Frontend**: Streamlit
-- **IA**: OpenAI GPT-4o
+- **IA**: 
+  - OpenAI GPT-4o (API)
+  - Gemma3:12b (local vía Ollama API)
 - **Base de Datos**: SQLite
 - **Procesamiento de PDFs**: pdf2image + Poppler
 - **Gestión de Dependencias**: Poetry
+- **API**: Requests para comunicación con Ollama
 
 ## Autor 👨‍💻
 
