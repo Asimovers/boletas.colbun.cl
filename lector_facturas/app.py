@@ -49,7 +49,7 @@ def procesar_imagen(imagen_bytes):
         
         # Crear el mensaje para GPT-4 Vision
         response = client.chat.completions.create(
-            model="gpt-4o",
+            model="gpt-4.1-2025-04-14",
             messages=[
                 {"role": "system", "content": "Responde únicamente con análisis estructurado en viñetas, sin saludos niS mensajes de cortesía."},
                 {
