@@ -2,6 +2,9 @@
 # Usa una imagen base oficial de Python
 FROM python:3-slim
 
+# Instala Poppler y dependencias del sistema
+RUN apt-get update && apt-get install -y poppler-utils && rm -rf /var/lib/apt/lists/*
+
 # Instala Poetry
 RUN pip install poetry
 
